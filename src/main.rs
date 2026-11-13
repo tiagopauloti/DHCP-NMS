@@ -2,8 +2,8 @@ use std::io::{self, Write};
 use std::ptr;
 use windows::core::{HSTRING, PCWSTR};
 use windows::Win32::NetworkManagement::Dhcp::{
-    DhcpEnumSubnetClients, DhcpEnumSubnets, DhcpRpcFreeMemory, DHCP_CLIENT_INFO_ARRAY,
-    DHCP_IP_ARRAY,
+    DhcpEnumSubnetClients, DhcpEnumSubnets, DhcpGetSubnetInfo, DhcpRpcFreeMemory,
+    DHCP_CLIENT_INFO_ARRAY, DHCP_IP_ARRAY, DHCP_SUBNET_INFO,
 };
 
 fn ler_entrada(prompt: &str) -> String {
@@ -17,6 +17,31 @@ fn ler_entrada(prompt: &str) -> String {
 fn ip_para_texto(ip: u32) -> String {
     let b = ip.to_be_bytes();
     format!("{}.{}.{}.{}", b[0], b[1], b[2], b[3])
+}
+
+// Função nativa que busca o nome descritivo do escopo cadastrado no servidor Windows
+unsafe fn obter_nome_escopo(server: &HSTRING, subnet_ip: u32) -> String {
+    let mut subnet_info_ptr: *mut DHCP_SUBNET_INFO = ptr::null_mut();
+    
+    let status = DhcpGetSubnetInfo(
+        PCWSTR(server.as_ptr()),
+        subnet_ip,
+        &mut subnet_info_ptr,
+    );
+
+    if status == 0 && !subnet_info_ptr.is_null() {
+        let info = &*subnet_info_ptr;
+        let nome = if !info.SubnetName.is_null() {
+            info.SubnetName.to_string().unwrap_or_else(|_| "Escopo sem nome".to_string())
+        } else {
+            "Sem Nome".to_string()
+        };
+
+        DhcpRpcFreeMemory(subnet_info_ptr as *mut _);
+        nome
+    } else {
+        format!("Escopo {}", ip_para_texto(subnet_ip))
+    }
 }
 
 fn main() {
@@ -54,15 +79,15 @@ fn main() {
                 let array = &*enum_info;
                 let subnets = std::slice::from_raw_parts(array.Elements, array.NumElements as usize);
                 
-                println!("\nEscopos IPv4 encontrados ({}):", array.NumElements);
+                println!("\nEscopos IPv4 encontrados no servidor '{}':", server_input);
                 for (i, &ip) in subnets.iter().enumerate() {
                     escopos.push(ip);
-                    println!("  [{}] {}", i + 1, ip_para_texto(ip));
+                    let nome_vlans = obter_nome_escopo(&server_hstring, ip);
+                    println!("  [{}] {} -> {}", i + 1, ip_para_texto(ip), nome_vlans);
                 }
                 DhcpRpcFreeMemory(enum_info as *mut _);
             } else {
                 eprintln!("\n[ERRO] Falha ao conectar em '{}'. Código Win32: {:#x}", server_input, status);
-                eprintln!("Dica: Verifique se você executou como Administrador no domínio.");
                 break;
             }
         }
