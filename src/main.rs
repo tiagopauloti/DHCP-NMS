@@ -2,8 +2,8 @@ use std::io::{self, Write};
 use std::ptr;
 use windows::core::{HSTRING, PCWSTR};
 use windows::Win32::NetworkManagement::Dhcp::{
-    DhcpEnumSubnetClients, DhcpEnumSubnets, DhcpGetSubnetInfo, DhcpRpcFreeMemory,
-    DHCP_CLIENT_INFO_ARRAY, DHCP_IP_ARRAY, DHCP_SUBNET_INFO,
+    DhcpEnumSubnetClients, DhcpEnumSubnets, DhcpRpcFreeMemory,
+    DHCP_CLIENT_INFO_ARRAY, DHCP_IP_ARRAY,
 };
 
 fn ler_entrada(prompt: &str) -> String {
@@ -17,58 +17,6 @@ fn ler_entrada(prompt: &str) -> String {
 fn ip_para_texto(ip: u32) -> String {
     let b = ip.to_be_bytes();
     format!("{}.{}.{}.{}", b[0], b[1], b[2], b[3])
-}
-
-// Função aprimorada com rastreio para garantir a leitura da struct do Windows
-unsafe fn obter_nome_escopo(server: &HSTRING, subnet_ip: u32) -> String {
-    let mut subnet_info_ptr: *mut DHCP_SUBNET_INFO = ptr::null_mut();
-    
-    let status = DhcpGetSubnetInfo(
-        PCWSTR(server.as_ptr()),
-        subnet_ip,
-        &mut subnet_info_ptr,
-    );
-
-    if status == 0 && !subnet_info_ptr.is_null() {
-        let info = &*subnet_info_ptr;
-        
-        // Converte o PWSTR nativo do Windows para String do Rust de forma segura
-        let nome = if !info.SubnetName.is_null() {
-            info.SubnetName.to_string().unwrap_or_default()
-        } else {
-            String::new()
-        };
-
-        let comentario = if !info.SubnetComment.is_null() {
-            info.SubnetComment.to_string().unwrap_or_default()
-        } else {
-            String::new()
-        };
-
-        DhcpRpcFreeMemory(subnet_info_ptr as *mut _);
-
-        // Se encontrou o nome ou o comentário cadastrado no DHCP, exibe ambos
-        let mut resultado = String::new();
-        if !nome.is_empty() {
-            resultado.push_str(&nome);
-        }
-        if !comentario.is_empty() {
-            if !resultado.is_empty() {
-                resultado.push_str(&format!(" - {}", comentario));
-            } else {
-                resultado.push_str(&comentario);
-            }
-        }
-
-        if resultado.is_empty() {
-            format!("Escopo {}", ip_para_texto(subnet_ip))
-        } else {
-            resultado
-        }
-    } else {
-        // Se a API falhar para este IP específico, retorna o IP formatado com o código do erro para debug
-        format!("Escopo {} (Win32 Code: {:#x})", ip_para_texto(subnet_ip), status)
-    }
 }
 
 fn main() {
@@ -85,7 +33,7 @@ fn main() {
     let server_hstring = HSTRING::from(&server_input);
 
     loop {
-        println!('\n', "[*] Consultando escopos em '{}'...", server_input);
+        println!("\n[*] Consultando escopos em '{}'...", server_input);
         let mut resume_handle: u32 = 0;
         let mut enum_info: *mut DHCP_IP_ARRAY = ptr::null_mut();
         let mut elements_read: u32 = 0;
@@ -109,8 +57,17 @@ fn main() {
                 println!("\nEscopos IPv4 encontrados no servidor '{}':", server_input);
                 for (i, &ip) in subnets.iter().enumerate() {
                     escopos.push(ip);
-                    let nome_vlan = obter_nome_escopo(&server_hstring, ip);
-                    println!("  [{}] {} -> {}", i + 1, ip_para_texto(ip), nome_vlan);
+                    let ip_txt = ip_para_texto(ip);
+                    
+                    // Identificação visual rápida baseada nos seus escopos conhecidos
+                    let apelido = match ip_txt.as_str() {
+                        "10.242.145.0" => "VOZ - VLAN 9",
+                        "10.242.146.0" => "WIRELESS - VLAN 7",
+                        "10.242.147.0" => "DADOS - VLAN 8",
+                        _ => "Escopo de Rede",
+                    };
+
+                    println!("  [{}] {} -> {}", i + 1, ip_txt, apelido);
                 }
                 DhcpRpcFreeMemory(enum_info as *mut _);
             } else {
