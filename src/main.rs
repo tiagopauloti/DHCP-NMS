@@ -19,7 +19,7 @@ fn ip_para_texto(ip: u32) -> String {
     format!("{}.{}.{}.{}", b[0], b[1], b[2], b[3])
 }
 
-// Função para buscar o nome descritivo do escopo (VLAN) configurado no servidor
+// Função ajustada para ler corretamente a string descritiva do escopo via RPC
 unsafe fn obter_nome_escopo(server: &HSTRING, subnet_ip: u32) -> String {
     let mut subnet_info_ptr: *mut DHCP_SUBNET_INFO = ptr::null_mut();
     
@@ -31,16 +31,35 @@ unsafe fn obter_nome_escopo(server: &HSTRING, subnet_ip: u32) -> String {
 
     if status == 0 && !subnet_info_ptr.is_null() {
         let info = &*subnet_info_ptr;
+        
+        // Tenta ler o nome do escopo (SubnetName) ou o comentário (SubnetComment)
         let nome = if !info.SubnetName.is_null() {
-            info.SubnetName.to_string().unwrap_or_else(|_| "Escopo sem nome".to_string())
+            info.SubnetName.to_string().unwrap_or_default()
         } else {
-            "Sem Nome".to_string()
+            String::new()
+        };
+
+        let comentario = if !info.SubnetComment.is_null() {
+            info.SubnetComment.to_string().unwrap_or_default()
+        } else {
+            String::new()
         };
 
         DhcpRpcFreeMemory(subnet_info_ptr as *mut _);
-        nome
+
+        if !nome.is_empty() {
+            if !comentario.is_empty() && comentario != nome {
+                format!("{} ({})", nome, comentario)
+            } else {
+                nome
+            }
+        } else if !comentario.is_empty() {
+            comentario
+        } else {
+            "Escopo Principal".to_string()
+        }
     } else {
-        "Rede Padrão".to_string()
+        format!("Escopo {}", ip_para_texto(subnet_ip))
     }
 }
 
@@ -82,7 +101,6 @@ fn main() {
                 println!("\nEscopos IPv4 encontrados no servidor '{}':", server_input);
                 for (i, &ip) in subnets.iter().enumerate() {
                     escopos.push(ip);
-                    // AQUI ESTÁ O AJUSTE: Chama a função para puxar o nome configurado na VLAN
                     let nome_vlan = obter_nome_escopo(&server_hstring, ip);
                     println!("  [{}] {} -> {}", i + 1, ip_para_texto(ip), nome_vlan);
                 }
