@@ -2,8 +2,8 @@ use std::io::{self, Write};
 use std::ptr;
 use windows::core::{HSTRING, PCWSTR};
 use windows::Win32::NetworkManagement::Dhcp::{
-    DhcpEnumSubnetClients, DhcpEnumSubnets, DhcpRpcFreeMemory,
-    DHCP_CLIENT_INFO_ARRAY, DHCP_IP_ARRAY,
+    DhcpEnumSubnetClients, DhcpEnumSubnets, DhcpGetSubnetInfo, DhcpRpcFreeMemory,
+    DHCP_CLIENT_INFO_ARRAY, DHCP_IP_ARRAY, DHCP_SUBNET_INFO,
 };
 
 fn ler_entrada(prompt: &str) -> String {
@@ -17,6 +17,56 @@ fn ler_entrada(prompt: &str) -> String {
 fn ip_para_texto(ip: u32) -> String {
     let b = ip.to_be_bytes();
     format!("{}.{}.{}.{}", b[0], b[1], b[2], b[3])
+}
+
+// Função inteligente que busca o nome real do escopo via RPC e aplica fallback se necessário
+unsafe fn obter_nome_escopo_dinamico(server: &HSTRING, subnet_ip: u32) -> String {
+    let mut subnet_info_ptr: *mut DHCP_SUBNET_INFO = ptr::null_mut();
+    
+    // Consulta os metadados do escopo diretamente no servidor DHCP
+    let status = DhcpGetSubnetInfo(
+        PCWSTR(server.as_ptr()),
+        subnet_ip,
+        &mut subnet_info_ptr,
+    );
+
+    if status == 0 && !subnet_info_ptr.is_null() {
+        let info = &*subnet_info_ptr;
+        
+        let nome = if !info.SubnetName.is_null() {
+            info.SubnetName.to_string().unwrap_or_default()
+        } else {
+            String::new()
+        };
+
+        let comentario = if !info.SubnetComment.is_null() {
+            info.SubnetComment.to_string().unwrap_or_default()
+        } else {
+            String::new()
+        };
+
+        DhcpRpcFreeMemory(subnet_info_ptr as *mut _);
+
+        // Retorna o nome oficial configurado no Windows Server
+        if !nome.is_empty() {
+            if !comentario.is_empty() && comentario != nome {
+                return format!("{} ({})", nome, comentario);
+            }
+            return nome;
+        } else if !comentario.is_empty() {
+            return comentario;
+        }
+    }
+
+    // Fallback universal inteligente caso a API de metadados recuse a leitura
+    let ip_txt = ip_para_texto(subnet_ip);
+    let b = subnet_ip.to_be_bytes();
+    match b[2] {
+        145 => format!("{} [VOZ / VLAN 9]", ip_txt),
+        146 => format!("{} [WIRELESS / VLAN 7]", ip_txt),
+        147 => format!("{} [DADOS / VLAN 8]", ip_txt),
+        _ => format!("{} [Escopo Corporativo]", ip_txt),
+    }
 }
 
 fn main() {
@@ -57,17 +107,8 @@ fn main() {
                 println!("\nEscopos IPv4 encontrados no servidor '{}':", server_input);
                 for (i, &ip) in subnets.iter().enumerate() {
                     escopos.push(ip);
-                    let ip_txt = ip_para_texto(ip);
-                    
-                    // Identificação visual rápida baseada nos seus escopos conhecidos
-                    let apelido = match ip_txt.as_str() {
-                        "10.242.145.0" => "VOZ - VLAN 9",
-                        "10.242.146.0" => "WIRELESS - VLAN 7",
-                        "10.242.147.0" => "DADOS - VLAN 8",
-                        _ => "Escopo de Rede",
-                    };
-
-                    println!("  [{}] {} -> {}", i + 1, ip_txt, apelido);
+                    let nome_vlan = obter_nome_escopo_dinamico(&server_hstring, ip);
+                    println!("  [{}] {}", i + 1, nome_vlan);
                 }
                 DhcpRpcFreeMemory(enum_info as *mut _);
             } else {
