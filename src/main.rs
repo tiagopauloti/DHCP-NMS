@@ -19,7 +19,7 @@ fn ip_para_texto(ip: u32) -> String {
     format!("{}.{}.{}.{}", b[0], b[1], b[2], b[3])
 }
 
-// Função nativa que busca o nome descritivo do escopo cadastrado no servidor Windows
+// Função para buscar o nome descritivo do escopo (VLAN) configurado no servidor
 unsafe fn obter_nome_escopo(server: &HSTRING, subnet_ip: u32) -> String {
     let mut subnet_info_ptr: *mut DHCP_SUBNET_INFO = ptr::null_mut();
     
@@ -40,7 +40,7 @@ unsafe fn obter_nome_escopo(server: &HSTRING, subnet_ip: u32) -> String {
         DhcpRpcFreeMemory(subnet_info_ptr as *mut _);
         nome
     } else {
-        format!("Escopo {}", ip_para_texto(subnet_ip))
+        "Rede Padrão".to_string()
     }
 }
 
@@ -82,8 +82,9 @@ fn main() {
                 println!("\nEscopos IPv4 encontrados no servidor '{}':", server_input);
                 for (i, &ip) in subnets.iter().enumerate() {
                     escopos.push(ip);
-                    let nome_vlans = obter_nome_escopo(&server_hstring, ip);
-                    println!("  [{}] {} -> {}", i + 1, ip_para_texto(ip), nome_vlans);
+                    // AQUI ESTÁ O AJUSTE: Chama a função para puxar o nome configurado na VLAN
+                    let nome_vlan = obter_nome_escopo(&server_hstring, ip);
+                    println!("  [{}] {} -> {}", i + 1, ip_para_texto(ip), nome_vlan);
                 }
                 DhcpRpcFreeMemory(enum_info as *mut _);
             } else {
