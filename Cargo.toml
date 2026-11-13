@@ -1,0 +1,16 @@
+[package]
+name = "dhcp-nms"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_Dhcp",
+] }
+
+[profile.release]
+opt-level = "z"     # Otimiza para o menor tamanho de arquivo possível
+lto = true          # Link Time Optimization
+codegen-units = 1
+strip = true        # Remove símbolos de depuração desnecessários
