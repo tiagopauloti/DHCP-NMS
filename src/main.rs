@@ -19,7 +19,7 @@ fn ip_para_texto(ip: u32) -> String {
     format!("{}.{}.{}.{}", b[0], b[1], b[2], b[3])
 }
 
-// Função ajustada para ler corretamente a string descritiva do escopo via RPC
+// Função aprimorada com rastreio para garantir a leitura da struct do Windows
 unsafe fn obter_nome_escopo(server: &HSTRING, subnet_ip: u32) -> String {
     let mut subnet_info_ptr: *mut DHCP_SUBNET_INFO = ptr::null_mut();
     
@@ -32,7 +32,7 @@ unsafe fn obter_nome_escopo(server: &HSTRING, subnet_ip: u32) -> String {
     if status == 0 && !subnet_info_ptr.is_null() {
         let info = &*subnet_info_ptr;
         
-        // Tenta ler o nome do escopo (SubnetName) ou o comentário (SubnetComment)
+        // Converte o PWSTR nativo do Windows para String do Rust de forma segura
         let nome = if !info.SubnetName.is_null() {
             info.SubnetName.to_string().unwrap_or_default()
         } else {
@@ -47,19 +47,27 @@ unsafe fn obter_nome_escopo(server: &HSTRING, subnet_ip: u32) -> String {
 
         DhcpRpcFreeMemory(subnet_info_ptr as *mut _);
 
+        // Se encontrou o nome ou o comentário cadastrado no DHCP, exibe ambos
+        let mut resultado = String::new();
         if !nome.is_empty() {
-            if !comentario.is_empty() && comentario != nome {
-                format!("{} ({})", nome, comentario)
+            resultado.push_str(&nome);
+        }
+        if !comentario.is_empty() {
+            if !resultado.is_empty() {
+                resultado.push_str(&format!(" - {}", comentario));
             } else {
-                nome
+                resultado.push_str(&comentario);
             }
-        } else if !comentario.is_empty() {
-            comentario
+        }
+
+        if resultado.is_empty() {
+            format!("Escopo {}", ip_para_texto(subnet_ip))
         } else {
-            "Escopo Principal".to_string()
+            resultado
         }
     } else {
-        format!("Escopo {}", ip_para_texto(subnet_ip))
+        // Se a API falhar para este IP específico, retorna o IP formatado com o código do erro para debug
+        format!("Escopo {} (Win32 Code: {:#x})", ip_para_texto(subnet_ip), status)
     }
 }
 
@@ -77,7 +85,7 @@ fn main() {
     let server_hstring = HSTRING::from(&server_input);
 
     loop {
-        println!("\n[*] Consultando escopos em '{}'...", server_input);
+        println!('\n', "[*] Consultando escopos em '{}'...", server_input);
         let mut resume_handle: u32 = 0;
         let mut enum_info: *mut DHCP_IP_ARRAY = ptr::null_mut();
         let mut elements_read: u32 = 0;
